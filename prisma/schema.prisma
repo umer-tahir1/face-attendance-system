@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum MessagingRole {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum ConversationType {
+  ATTENDANCE_ISSUE
+  GENERAL
+  LAB_ISSUE
+}
+
+enum ConversationStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum ConversationPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AttendanceIssueType {
+  ABSENT_MARKED_WRONG
+  LAB_MISSING
+  ATTENDANCE_NOT_UPDATED
+}
+
+enum NotificationType {
+  NEW_CONVERSATION
+  NEW_MESSAGE
+  STATUS_CHANGED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  avatarUrl    String?
+  role         Role
+  teacher      Teacher?
+  createdConversations Conversation[]        @relation("ConversationCreator")
+  sentConversationMessages ConversationMessage[] @relation("ConversationMessageSender")
+  conversationNotifications AppNotification[]
+  conversationAuditLogs    ConversationAuditLog[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Department {
+  id          String          @id @default(cuid())
+  name        String
+  code        String          @unique
+  programs    Program[]
+  teachers    Teacher[]
+  students    Student[]
+  classes     AcademicClass[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([name, code])
+}
+
+model Program {
+  id           String          @id @default(cuid())
+  name         String
+  code         String
+  departmentId String
+  department   Department      @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  students     Student[]
+  classes      AcademicClass[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([departmentId, code])
+}
+
+model Teacher {
+  id             String          @id @default(cuid())
+  userId         String          @unique
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  departmentId   String
+  department     Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  employeeId     String          @unique
+  classes        AcademicClass[]
+  conversations  Conversation[]
+  timetable      Timetable[]
+  attendances    Attendance[]
+  sessions       AttendanceSession[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Student {
+  id           String       @id @default(cuid())
+  name         String
+  rollNumber   String       @unique
+  email        String?
+  programId    String
+  program      Program      @relation(fields: [programId], references: [id], onDelete: Restrict)
+  departmentId String
+  department   Department   @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  faceEncoding Json
+  faceImages   Json?
+  enrollments  Enrollment[]
+  attendances  Attendance[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model AcademicClass {
+  id            String              @id @default(cuid())
+  name          String
+  code          String
+  section       String              @default("A")
+  credits       Int                 @default(3)
+  hasLab        Boolean             @default(false)
+  labName       String?
+  labAttendanceRequired Boolean     @default(false)
+  teacherId     String
+  teacher       Teacher             @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  programId     String
+  program       Program             @relation(fields: [programId], references: [id], onDelete: Restrict)
+  departmentId  String
+  department    Department          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  enrollments   Enrollment[]
+  timetable     Timetable[]
+  attendances   Attendance[]
+  sessions      AttendanceSession[]
+  conversations Conversation[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([programId, code])
+}
+
+model Enrollment {
+  id              String        @id @default(cuid())
+  studentId       String
+  student         Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  academicClassId String
+  academicClass   AcademicClass @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([studentId, academicClassId])
+}
+
+model Timetable {
+  id              String        @id @default(cuid())
+  academicClassId String
+  academicClass   AcademicClass @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
+  teacherId       String
+  teacher         Teacher       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  day             DayOfWeek
+  startTime       String
+  endTime         String
+  room            String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model AttendanceSession {
+  id              String        @id @default(cuid())
+  academicClassId String
+  academicClass   AcademicClass @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
+  teacherId       String
+  teacher         Teacher       @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  date            DateTime
+  status          SessionStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model Attendance {
+  id              String           @id @default(cuid())
+  studentId       String
+  student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  academicClassId String
+  academicClass   AcademicClass    @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
+  teacherId       String
+  teacher         Teacher          @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  date            DateTime
+  status          AttendanceStatus
+  confidence      Float?
+  method          String           @default("ai")
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([studentId, academicClassId, date])
+}
+
+model Conversation {
+  id                     String                 @id @default(cuid())
+  createdByUserId        String?
+  createdByUser          User?                  @relation("ConversationCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByTeacherId     String?
+  createdByTeacher       Teacher?               @relation(fields: [createdByTeacherId], references: [id], onDelete: SetNull)
+  type                   ConversationType
+  status                 ConversationStatus     @default(OPEN)
+  priority               ConversationPriority   @default(MEDIUM)
+  subject                String?
+  relatedCourseId        String?
+  relatedCourse          AcademicClass?         @relation(fields: [relatedCourseId], references: [id], onDelete: SetNull)
+  relatedLab             String?
+  attendanceIssueType    AttendanceIssueType?
+  attendanceIssuePayload Json?
+  messages               ConversationMessage[]
+  notifications          AppNotification[]
+  auditLogs              ConversationAuditLog[]
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  @@index([status])
+  @@index([priority, status])
+  @@index([relatedCourseId])
+  @@index([createdByTeacherId])
+}
+
+model ConversationMessage {
+  id             String                  @id @default(cuid())
+  conversationId String
+  conversation   Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User                    @relation("ConversationMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  senderRole     MessagingRole
+  receiverRole   MessagingRole
+  messageText    String
+  attachments    Json?
+  parentMessageId String?
+  parentMessage  ConversationMessage?    @relation("ConversationThread", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  replies        ConversationMessage[]   @relation("ConversationThread")
+  notifications  AppNotification[]
+  readStatus     Boolean                 @default(false)
+  readAt         DateTime?
+  createdAt      DateTime                @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([receiverRole, readStatus])
+}
+
+model AppNotification {
+  id             String               @id @default(cuid())
+  userId         String
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           NotificationType
+  title          String
+  body           String
+  conversationId String?
+  conversation   Conversation?        @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  messageId      String?
+  message        ConversationMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  isRead         Boolean              @default(false)
+  createdAt      DateTime             @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model ConversationAuditLog {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  actorId        String
+  actor          User         @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  actorRole      MessagingRole
+  action         String
+  details        Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
