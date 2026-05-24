@@ -6,7 +6,11 @@ import morgan from 'morgan';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import {
+import prismaClientPkg from '@prisma/client';
+import { signAuthToken, verifyAuthToken } from './lib/auth.js';
+import { matchFaces } from './lib/faceMatcher.js';
+
+const {
   Prisma,
   PrismaClient,
   Role,
@@ -19,20 +23,35 @@ import {
   ConversationPriority,
   AttendanceIssueType,
   NotificationType,
-} from '@prisma/client';
-import { signAuthToken, verifyAuthToken } from './lib/auth.js';
-import { matchFaces } from './lib/faceMatcher.js';
+} = prismaClientPkg;
 
 const prisma = new PrismaClient();
 const app = express();
 
 const PORT = Number(process.env.PORT || 4000);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const ALLOW_VERCEL_PREVIEWS = process.env.ALLOW_VERCEL_PREVIEWS === 'true';
+const clientOrigins = CLIENT_ORIGIN.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (clientOrigins.includes(origin)) return true;
+  if (ALLOW_VERCEL_PREVIEWS && origin.toLowerCase().endsWith('.vercel.app')) return true;
+  return false;
+};
 
 app.use(helmet());
 app.use(
   cors({
-    origin: CLIENT_ORIGIN,
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Not allowed by CORS'));
+    },
     credentials: true,
   }),
 );
@@ -1488,7 +1507,10 @@ app.post(
   requireRoles('admin'),
   asyncHandler(async (req, res) => {
     const payload = timetableSchema.parse(req.body);
-    const academicClass = await prisma.academicClass.findUnique({ where: { id: payload.classId } });
+    const academicClass = await prisma.academicClass.findUnique({
+      where: { id: payload.classId },
+      include: { teacher: { include: { user: true } } },
+    });
 
     if (!academicClass) {
       return res.status(404).json({ message: 'Class not found.' });
@@ -1503,19 +1525,22 @@ app.post(
       return res.status(400).json({ message: 'startTime must be before endTime.' });
     }
 
-    const existingSlots = await prisma.timetable.findMany({
-      where: {
-        teacherId: academicClass.teacherId,
-        day: DayOfWeek[dayKey],
-      },
-    });
+    const isDefaultTeacher = academicClass.teacher?.user?.email === 'teacher@nust.edu.pk';
+    if (!isDefaultTeacher) {
+      const existingSlots = await prisma.timetable.findMany({
+        where: {
+          teacherId: academicClass.teacherId,
+          day: DayOfWeek[dayKey],
+        },
+      });
 
-    const hasOverlap = existingSlots.some((slot) =>
-      rangesOverlap(slot.startTime, slot.endTime, payload.startTime, payload.endTime),
-    );
+      const hasOverlap = existingSlots.some((slot) =>
+        rangesOverlap(slot.startTime, slot.endTime, payload.startTime, payload.endTime),
+      );
 
-    if (hasOverlap) {
-      return res.status(409).json({ message: 'Timetable overlap detected for this teacher.' });
+      if (hasOverlap) {
+        return res.status(409).json({ message: 'Timetable overlap detected for this teacher.' });
+      }
     }
 
     const created = await prisma.timetable.create({
